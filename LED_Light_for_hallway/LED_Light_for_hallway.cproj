@@ -107,6 +107,9 @@
     </ToolchainSettings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="bits_macros.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="LED_Light_for_hallway.c">
       <SubType>compile</SubType>
     </Compile>
