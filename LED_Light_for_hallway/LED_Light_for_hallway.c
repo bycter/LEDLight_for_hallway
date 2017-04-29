@@ -1,4 +1,4 @@
-/*
+п»ї/*
  * LED_Light_for_hallway.c
  *
  * Created: 13.01.2017
@@ -11,14 +11,8 @@
 #include "bits_macros.h"
 #include <avr/io.h>
 #include <util/delay.h>
+#include <avr/interrupt.h>
 
-
-enum DEV_MODE{
-	CHECKING,
-	GLOW,
-	LIGHT,
-	FADE
-};
 
 #define PWM_OUT          PORTB0
 #define PHOTO_SENSOR_LED PORTB1
@@ -38,16 +32,24 @@ T(s) = T_light(s) + T_fade(s)
 T_light(s) = LIGHT_TIME * 1000 / PAUSE
 T_fade(s) = PWM_MAX * PAUSE * 1000
 */
-#define LIGHT_TIME 5 // in seconds
+#define LIGHT_TIME 6 // in seconds, MAX = 1310s
 #define PAUSE 20 // in ms
-#define DELAY_COUNTS LIGHT_TIME * 1000 / PAUSE
+#define LIGHT_TIME_COUNTS LIGHT_TIME * 1000UL / PAUSE
 
-#if DELAY_COUNTS > 255
-	#error "DELAY_COUNTS must be less than 256! Check values of LIGHT_TIME and PAUSE."
+
+#if LIGHT_TIME_COUNTS > 65535
+	#error "LIGHT_TIME_COUNTS must be less than 65536! Check values of LIGHT_TIME and PAUSE."
 #endif
 
+enum DEV_MODE{
+  CHECKING,
+  GLOW,
+  LIGHT,
+  FADE
+};
+
 ///Global variables
-uint8_t g_state;
+volatile uint8_t g_AIN_state = 0;
 
 //Fuctions prototypes
 void initMC(void);
@@ -56,10 +58,10 @@ uint8_t CheckPort(uint8_t);
 void StartPWM(void);
 void StopPWM(void);
 
-void initMC(){
+inline void initMC(){
   
 	/*	;=======================================================================
-		Альтернативные функции пинов
+		РђР»СЊС‚РµСЂРЅР°С‚РёРІРЅС‹Рµ С„СѓРЅРєС†РёРё РїРёРЅРѕРІ
                                           DEFINE            DDR   PORT
 			PB5	(RESET/ADC0/dW/PCINT5)          ---               0     0
 			PB4	(ADC2/PCINT4)                   SENSOR2           IN    pull-up
@@ -73,31 +75,47 @@ void initMC(){
 
   asm("nop");
 
-  //  Сбрасываем все регистры таймера
+  // РўР°Р№РјРµСЂ РѕСЃС‚Р°РЅРѕРІР»РµРЅ
   TCCR0A =	0x00;
 	TCCR0B =	0x00;
-  TCNT0 =   0x00;
-  OCR0A =   0x00;
   
   /************************************************************************/
-  /*  Настраваем компаратор                                               */
+  /*  РќР°СЃС‚СЂР°РІР°РµРј РєРѕРјРїР°СЂР°С‚РѕСЂ                                               */
   /************************************************************************/
-  //  Подключение к AIN0 внутреннего ИОН = 1.1V
-  ACSR = (0<<ACD) | (1<<ACBG) | (0<<ACI) | (0<<ACIE) | (0<<ACIS1) | (0<<ACIS0);
-	//ACSR = (1<<ACD);
-	ADCSRA &= ~(0<<ADEN); // Выключаем АЦП
-	ADCSRB |= (1<<ACME);	//Подключение мультиплексора АЦП к компаратору 
-	ADMUX = (0<<MUX1) | (1<<MUX0); // Переназначение входа AIN1 -> ADC1 (PB1 -> PB2)
+  /*
+    РљРѕРјРїР°СЂР°С‚РѕСЂ РІРєР»СЋС‡РµРЅ
+    РџРѕРґРєР»СЋС‡РµРЅРёРµ Рє AIN0 РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ РРћРќ = 1.1V (ACBG)
+    Р’РєР»СЋС‡РµРЅРѕ РїСЂРµСЂС‹РІР°РЅРёРµ (ACIE) РїРѕ Р»СЋР±РѕРјСѓ РёР·РјРµРЅРµРЅРёСЋ РєРѕРјРїР°СЂР°С‚РѕСЂР° (ACIS[1:0])
+    Р’РєР»СЋС‡РµРЅ РјСѓР»СЊС‚РёРїР»РµРєСЃРѕСЂ (ACME)
+    РђР¦Рџ РІС‹РєР»СЋС‡РµРЅ (ADEN)
+    РџРµСЂРµРЅР°Р·РЅР°С‡РµРЅРёРµ РІС…РѕРґР° РєРѕРјРїР°СЂР°С‚РѕСЂР° AIN1(PB1) -> РЅР° РІС…РѕРґ РђР¦Рџ ADC1(PB2)
+  */
+  ACSR = (0<<ACD) | (1<<ACBG) | (0<<ACIE) | (0<<ACIS1) | (0<<ACIS0);
+	ADCSRA &= ~(0<<ADEN); // Р’С‹РєР»СЋС‡Р°РµРј РђР¦Рџ
+	ADCSRB |= (1<<ACME);	//РџРѕРґРєР»СЋС‡РµРЅРёРµ РјСѓР»СЊС‚РёРїР»РµРєСЃРѕСЂР° РђР¦Рџ Рє РєРѕРјРїР°СЂР°С‚РѕСЂСѓ 
+	ADMUX = (0<<MUX1) | (1<<MUX0); // РџРµСЂРµРЅР°Р·РЅР°С‡РµРЅРёРµ РІС…РѕРґР° AIN1 -> ADC1 (PB1 -> PB2)
 
+}
+
+ISR(ANA_COMP_vect){
+  if (BitIsSet(ACSR, ACO))
+  {
+    g_AIN_state = 1; // Р’ РїСЂРёС…РѕР¶РµР№ СЃРІРµС‚Р»Рѕ
+  } else 
+  {
+    g_AIN_state = 0; // Р’ РїСЂРёС…РѕР¶РµР№ С‚РµРјРЅРѕ
+  }
+  
 }
 
 int main(void)
 {
 	initMC();
 
+  uint8_t programState;
 	uint8_t pwm = 0;
-	unsigned short delay = 0;
-	g_state = CHECKING;
+	uint16_t lightTime_delay = 0; // max counts = 65535
+	programState = CHECKING;
 
 	uint8_t counter = 0;  
   // Variable pwm_state allow to do FADE time twice long than GLOW time
@@ -107,28 +125,27 @@ int main(void)
 	//asm("sei");
 	while (1)
 	{
-		//SetBitVal(PORTB, PHOTO_SENSOR_LED, BitIsSet(ACSR, ACO));
     if (counter == 250)
 		{
 			counter = 0;
-			if (BitIsSet(ACSR, ACO))
-			{
-				ClearBit(PORTB, PHOTO_SENSOR_LED); // включить LED
-				photoSensorState = 1; // В прихожей светло
-			} else {
-				SetBit(PORTB, PHOTO_SENSOR_LED); // выключить LED
-				photoSensorState = 0; // В прихожей темно
-			}
+			  if (BitIsSet(ACSR, ACO))
+			  {
+  			  ClearBit(PORTB, PHOTO_SENSOR_LED); // РІРєР»СЋС‡РёС‚СЊ LED
+  			  photoSensorState = 1; // Р’ РїСЂРёС…РѕР¶РµР№ СЃРІРµС‚Р»Рѕ
+  			  } else {
+  			  SetBit(PORTB, PHOTO_SENSOR_LED); // РІС‹РєР»СЋС‡РёС‚СЊ LED
+  			  photoSensorState = 0; // Р’ РїСЂРёС…РѕР¶РµР№ С‚РµРјРЅРѕ
+			  }
 		}
     
-    switch (g_state)
+    switch (programState)
 		{
 			case CHECKING:
-			  if (!photoSensorState) // если темно и есть движение - в режим GLOW
+			  if (!photoSensorState) // РµСЃР»Рё С‚РµРјРЅРѕ Рё РµСЃС‚СЊ РґРІРёР¶РµРЅРёРµ - РІ СЂРµР¶РёРј GLOW
 			  {
 				  if(CheckPort(SENSOR1) || CheckPort(SENSOR2))
 				  {
-					  g_state = GLOW;
+					  programState = GLOW;
 					  StartPWM();
 					  OCR0A = pwm = PWM_MIN;
 				  }
@@ -140,23 +157,23 @@ int main(void)
         if (pwm >= PWM_MAX)
 			  {
   			  pwm = PWM_MAX;
-  			  g_state = LIGHT;
-  			  delay = 0;
+  			  programState = LIGHT;
+  			  lightTime_delay = 0;
 			  }
 			  break;
 
 			case LIGHT:
-			  delay++;
-			  if (CheckPort(SENSOR1) || CheckPort(SENSOR2)) delay = 0;
-				if (photoSensorState) g_state = FADE; // если светло - в режим FADE
-			  if (delay > DELAY_COUNTS)
+			  lightTime_delay++;
+			  if (CheckPort(SENSOR1) || CheckPort(SENSOR2)) lightTime_delay = 0;
+				if (photoSensorState) programState = FADE; // РµСЃР»Рё СЃРІРµС‚Р»Рѕ - РІ СЂРµР¶РёРј FADE
+			  if (lightTime_delay > LIGHT_TIME_COUNTS)
 			  {
-				  g_state = FADE;
+				  programState = FADE;
 			  }
 			  break;
 
 			case FADE:
-			  if (pwm_state == ON) // засчет этого IF тухнем в два раза медленнее, чем разгораемся
+			  if (pwm_state == ON) // Р·Р°СЃС‡РµС‚ СЌС‚РѕРіРѕ IF С‚СѓС…РЅРµРј РІ РґРІР° СЂР°Р·Р° РјРµРґР»РµРЅРЅРµРµ, С‡РµРј СЂР°Р·РіРѕСЂР°РµРјСЃСЏ
 			  {
 				  pwm--;
 				  pwm_state = OFF;
@@ -164,11 +181,11 @@ int main(void)
 			  else
 			  {
 				  pwm_state = ON;
-				  if (!photoSensorState) // если темно и есть движение - в режим GLOW
+				  if (!photoSensorState) // РµСЃР»Рё С‚РµРјРЅРѕ Рё РµСЃС‚СЊ РґРІРёР¶РµРЅРёРµ - РІ СЂРµР¶РёРј GLOW
 				  {
 					  if (CheckPort(SENSOR1) || CheckPort(SENSOR2))
 					  {
-					    g_state = GLOW;
+					    programState = GLOW;
 			      }
 				  }
 			  }
@@ -176,7 +193,7 @@ int main(void)
 			  if (pwm < PWM_MIN)
 			  {
 				  StopPWM();
-				  g_state = CHECKING;
+				  programState = CHECKING;
 			  }
 			  break;
 		}
@@ -217,9 +234,9 @@ uint8_t CheckPhotoSensor(void)
 }
 
 /**************************************************************************/
-/*  Таймер настраиваем на Fast PWM                                        */
-/*  Вывод PB0 режим: сбросить при совпадении, установка когда OC0A = MAX  */
-/*  Частота ШИМ максимальная, частота_CPU/256 = 37.5 кГц                  */
+/*  РўР°Р№РјРµСЂ РЅР°СЃС‚СЂР°РёРІР°РµРј РЅР° Fast PWM                                        */
+/*  Р’С‹РІРѕРґ PB0 СЂРµР¶РёРј: СЃР±СЂРѕСЃРёС‚СЊ РїСЂРё СЃРѕРІРїР°РґРµРЅРёРё, СѓСЃС‚Р°РЅРѕРІРєР° РєРѕРіРґР° OC0A = MAX  */
+/*  Р§Р°СЃС‚РѕС‚Р° РЁРРњ РјР°РєСЃРёРјР°Р»СЊРЅР°СЏ, С‡Р°СЃС‚РѕС‚Р°_CPU/256 = 37.5 РєР“С†                  */
 /**************************************************************************/
 void StartPWM(void)
 {
