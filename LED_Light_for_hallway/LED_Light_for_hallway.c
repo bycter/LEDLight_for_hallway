@@ -28,25 +28,33 @@
 #define OFF			         0
 
 // Set the common delay time in ms
-#define PAUSE 20
+#define COMMON_PAUSE 20
 
 // Задаем время свечения подсветки
-#define LIGHT_TIME 6 // in seconds, MAX = 1310s
+#define LED_LIGHTTIME 6 // in seconds, MAX = 1310s
+
+// Задаем периодичность проверки датчиков движения
+#define MOVE_SENSOR_CHECKTIME 1 // in seconds, MAX = 1310s
 
 // Задаем периодичность проверки фотодатчика
-#define PHOTO_SENSOR_TIME 2 // in seconds, MAX = 1310s
+#define PHOTO_SENSOR_CHECKTIME 2 // in seconds, MAX = 1310s
 
 
-#define LIGHT_TIME_COUNTS LIGHT_TIME * 1000UL / PAUSE
-#define PHOTO_SENSOR_TIME_COUNTS PHOTO_SENSOR_TIME * 1000UL / PAUSE
-
-#if LIGHT_TIME_COUNTS > 65535
-	#error "LIGHT_TIME_COUNTS must be less than 65536! Check values of LIGHT_TIME and PAUSE."
+#define LED_LIGHTTIME_COUNTS LED_LIGHTTIME * 1000UL / COMMON_PAUSE
+#if LED_LIGHTTIME_COUNTS > 65535
+	#error "LED_LIGHTTIME_COUNTS must be less than 65536! Check values of LED_LIGHTTIME and COMMON_PAUSE."
 #endif
 
-#if PHOTO_SENSOR_TIME > 65535
-#error "PHOTO_SENSOR_TIME_COUNTS must be less than 65536! Check values of PHOTO_SENSOR_TIME and PAUSE."
+#define MOVE_SENSOR_CHECKTIME_COUNTS MOVE_SENSOR_CHECKTIME * 1000UL / COMMON_PAUSE
+#if MOVE_SENSOR_CHECKTIME_COUNTS > 65535
+#error "MOVE_SENSOR_CHECKTIME_COUNTS must be less than 65536! Check values of MOVE_SENSOR_CHECKTIME and COMMON_PAUSE."
 #endif
+
+#define PHOTO_SENSOR_CHECKTIME_COUNTS PHOTO_SENSOR_CHECKTIME * 1000UL / COMMON_PAUSE
+#if PHOTO_SENSOR_CHECKTIME_COUNTS > 65535
+#error "PHOTO_SENSOR_CHECKTIME_COUNTS must be less than 65536! Check values of PHOTO_SENSOR_CHECKTIME and COMMON_PAUSE."
+#endif
+
 
 enum DEV_MODE{
   CHECKING,
@@ -119,21 +127,23 @@ int main(void)
 {
 	initMC();
 
-  uint8_t programState;
-  uint16_t lightTime_counts = 0; // max counts = 65535
-  uint16_t checkPhotoSensor_counts = 0; // max counts = 65535
-	
-	programState = CHECKING;
+  // Объявление переменных статуса
+  uint8_t programState = CHECKING;
+  uint8_t photoSensorState = 0;
   // Variable pwm_state allow to do FADE time twice long than GLOW time
 	uint8_t pwm_state = ON;
-  uint8_t photoSensorState = 0;
   uint8_t pwm = 0;
   
+  // Объявление счетчиков
+  uint16_t lightTime_counts = 0;
+  uint16_t checkPhotoSensor_counts = 0;
+  uint16_t checkMoveSensor_counts = 0;
+
 	asm("sei");
-  
+
 	while (1)
 	{
-    if (checkPhotoSensor_counts > PHOTO_SENSOR_TIME_COUNTS)
+    if (checkPhotoSensor_counts > PHOTO_SENSOR_CHECKTIME_COUNTS)
 		{
       checkPhotoSensor_counts = 0;
 			if (g_AIN_state)  // Проверям переменную из прерывания компаратора
@@ -146,7 +156,7 @@ int main(void)
   			photoSensorState = 0; // В прихожей темно
 			}
 		}
-    
+
     switch (programState)
 		{
 			case CHECKING:
@@ -175,7 +185,7 @@ int main(void)
 			  lightTime_counts++;
 			  if (CheckPort(MOVE_SENSOR1) || CheckPort(MOVE_SENSOR2)) lightTime_counts = 0;
 				if (photoSensorState) programState = FADE; // если светло - в режим FADE
-			  if (lightTime_counts > LIGHT_TIME_COUNTS)
+			  if (lightTime_counts > LED_LIGHTTIME_COUNTS)
 			  {
 				  programState = FADE;
 			  }
@@ -208,7 +218,7 @@ int main(void)
 		}
 
 		OCR0A = pwm;
-		_delay_ms(PAUSE);
+		_delay_ms(COMMON_PAUSE);
 		checkPhotoSensor_counts++;
 	}
 }
@@ -226,28 +236,12 @@ uint8_t CheckPort(uint8_t port)
 	else return 0;
 }
 
-/* This function check Photo Sensor
-    It return OFF - when dark, ON - when led light don't need
-    Comparator settings see initMC()
-*/
-uint8_t CheckPhotoSensor(void)
-{
-  uint8_t count = 0;
-  uint8_t i;
-  for (i = 0; i < 16; i++)
-  {
-	  if (BitIsSet(ACSR, ACO)) count++;
-  }
-  if (count > 10) return 1;
-  else return 0; 
-}
-
 /**************************************************************************/
 /*  Таймер настраиваем на Fast PWM                                        */
 /*  Вывод PB0 режим: сбросить при совпадении, установка когда OC0A = MAX  */
 /*  Частота ШИМ максимальная, частота_CPU/256 = 37.5 кГц                  */
 /**************************************************************************/
-void StartPWM(void)
+inline void StartPWM(void)
 {
   TCCR0A = (1<<COM0A1) |	(0<<COM0A0) |	(1<<WGM01) |	(1<<WGM00);
 	TCCR0B = (1<<CS00);
@@ -255,7 +249,7 @@ void StartPWM(void)
 	OCR0A = 0;
 }
 
-void StopPWM(void)
+inline void StopPWM(void)
 {
   TCCR0A=0x00;
 	TCCR0B=0x00;
