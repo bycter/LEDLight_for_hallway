@@ -13,7 +13,7 @@
     <OutputFileExtension>.elf</OutputFileExtension>
     <OutputDirectory>$(MSBuildProjectDirectory)\$(Configuration)</OutputDirectory>
     <AssemblyName>LED_Light_for_hallway</AssemblyName>
-    <Name>LED_Light_for_hallway</Name>
+    <Name>LEDLight_for_hallway</Name>
     <RootNamespace>LED_Light_for_hallway</RootNamespace>
     <ToolchainFlavour>Native</ToolchainFlavour>
     <KeepTimersRunning>true</KeepTimersRunning>
