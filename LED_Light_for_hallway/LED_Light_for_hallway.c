@@ -130,6 +130,7 @@ int main(void)
   // Объявление переменных статуса
   uint8_t programState = CHECKING;
   uint8_t photoSensorState = 0;
+  uint8_t moveSensorState = 0;
   // Variable pwm_state allow to do FADE time twice long than GLOW time
 	uint8_t pwm_state = ON;
   uint8_t pwm = 0;
@@ -157,17 +158,29 @@ int main(void)
 			}
 		}
 
+    if (checkMoveSensor_counts > MOVE_SENSOR_CHECKTIME_COUNTS)
+    {
+      checkMoveSensor_counts = 0;
+      if (CheckPort(MOVE_SENSOR1) || CheckPort(MOVE_SENSOR2))  // Проверям состояние портов датчиков движения
+      {
+        moveSensorState = 1;
+      } else
+      {
+        moveSensorState = 0;
+      }
+    }
+
+    checkPhotoSensor_counts++;
+    checkMoveSensor_counts++
+
     switch (programState)
 		{
 			case CHECKING:
-			  if (!photoSensorState) // если темно и есть движение - в режим GLOW
+			  if (!photoSensorState && moveSensorState) // если темно и есть движение - в режим GLOW
 			  {
-				  if(CheckPort(MOVE_SENSOR1) || CheckPort(MOVE_SENSOR2))
-				  {
-					  programState = GLOW;
-					  StartPWM();
-					  OCR0A = pwm = PWM_MIN;
-				  }
+					programState = GLOW;
+					StartPWM();
+					OCR0A = pwm = PWM_MIN;
 			  }
 			  break;
 
@@ -183,7 +196,7 @@ int main(void)
 
 			case LIGHT:
 			  lightTime_counts++;
-			  if (CheckPort(MOVE_SENSOR1) || CheckPort(MOVE_SENSOR2)) lightTime_counts = 0;
+			  if (moveSensorState) lightTime_counts = 0;
 				if (photoSensorState) programState = FADE; // если светло - в режим FADE
 			  if (lightTime_counts > LED_LIGHTTIME_COUNTS)
 			  {
@@ -200,12 +213,9 @@ int main(void)
 			  else
 			  {
 				  pwm_state = ON;
-				  if (!photoSensorState) // если темно и есть движение - в режим GLOW
+				  if (!photoSensorState && moveSensorState) // если темно и есть движение - в режим GLOW
 				  {
-					  if (CheckPort(MOVE_SENSOR1) || CheckPort(MOVE_SENSOR2))
-					  {
-					    programState = GLOW;
-			      }
+					  programState = GLOW;
 				  }
 			  }
 
@@ -219,7 +229,6 @@ int main(void)
 
 		OCR0A = pwm;
 		_delay_ms(COMMON_PAUSE);
-		checkPhotoSensor_counts++;
 	}
 }
 
